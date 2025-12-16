@@ -5,6 +5,8 @@ import UploadSection from './components/UploadSection';
 import StudentEntrySection from './components/StudentEntrySection';
 import QuizSection from './components/QuizSection';
 import ResultSection from './components/ResultSection';
+import TeacherLoginSection from './components/TeacherLoginSection';
+import LandingSection from './components/LandingSection';
 
 // Helper function to shuffle an array (Fisher-Yates algorithm)
 const shuffleArray = <T,>(array: T[]): T[] => {
@@ -42,7 +44,9 @@ const randomizeQuiz = (questions: Question[]): Question[] => {
 };
 
 const App: React.FC = () => {
-  const [appState, setAppState] = useState<AppState>(AppState.IDLE);
+  // Initial state is now LANDING to allow role selection
+  const [appState, setAppState] = useState<AppState>(AppState.LANDING);
+  
   // questions state holds the *current* student's randomized version
   const [questions, setQuestions] = useState<Question[]>([]);
   // originalQuestions holds the "master" copy from the image analysis
@@ -56,6 +60,11 @@ const App: React.FC = () => {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [currentResultId, setCurrentResultId] = useState<string>("");
 
+  // Handler for successful login
+  const handleTeacherLoginSuccess = () => {
+    setAppState(AppState.IDLE);
+  };
+
   // Phase 1: Teacher uploads image
   const handleImageSelected = async (base64: string, mimeType: string) => {
     setAppState(AppState.ANALYZING);
@@ -66,7 +75,7 @@ const App: React.FC = () => {
       setOriginalQuestions(questionsWithIds); // Save the master copy
       setQuestions(questionsWithIds); // Initialize
       
-      // Move to student phase
+      // Move to student phase directly after creation
       setAppState(AppState.WAITING_FOR_STUDENT);
     } catch (error) {
       console.error(error);
@@ -126,40 +135,49 @@ const App: React.FC = () => {
     setAppState(AppState.WAITING_FOR_STUDENT);
   };
 
-  // Option B: New Quiz (Teacher uploads new image)
+  // Option B: New Quiz (Teacher Action)
+  // This destroys current quiz and goes to login
   const handleNewQuiz = () => {
-    const password = window.prompt("Vui lòng nhập mật khẩu giáo viên để tạo đề mới:");
-    if (password === null) return; // User cancelled
-    if (password !== "123456") {
-      alert("Mật khẩu không đúng!");
-      return;
-    }
-
-    // Reset everything INCLUDING leaderboard and original questions
-    setQuestions([]);
-    setOriginalQuestions([]);
-    setLeaderboard([]); // Clear leaderboard for new quiz
-    setUserAnswers({});
-    setTimeSpent(0);
-    setStudentInfo({ name: '', className: '', school: '' });
-    // Go back to upload
-    setAppState(AppState.IDLE);
-  };
-
-  // Option C: Exit (Reset to start screen without password)
-  const handleExit = () => {
-    if (confirm("Bạn có chắc chắn muốn thoát về màn hình chính?")) {
+    if (confirm("Hành động này sẽ xóa đề thi hiện tại và bảng xếp hạng. Bạn sẽ cần đăng nhập lại để tạo đề mới. Tiếp tục?")) {
       setQuestions([]);
       setOriginalQuestions([]);
-      setLeaderboard([]); // Also clear leaderboard on exit
+      setLeaderboard([]); 
       setUserAnswers({});
       setTimeSpent(0);
       setStudentInfo({ name: '', className: '', school: '' });
-      setAppState(AppState.IDLE);
+      setAppState(AppState.TEACHER_LOGIN);
     }
   };
 
+  // Option C: Exit / Home
+  // Returns to Landing Page but PRESERVES the current quiz (if any)
+  // So other students can enter without teacher login
+  const handleExit = () => {
+    if (confirm("Về màn hình chính? Kết quả làm bài hiện tại sẽ không được lưu (nếu chưa nộp).")) {
+      // Clear CURRENT user progress
+      setUserAnswers({});
+      setTimeSpent(0);
+      setStudentInfo({ name: '', className: '', school: '' });
+      // Go to Landing
+      setAppState(AppState.LANDING);
+    }
+  };
+
+  // Landing Page Handlers
+  const handleLandingTeacherSelect = () => {
+    setAppState(AppState.TEACHER_LOGIN);
+  };
+
+  const handleLandingStudentSelect = () => {
+    if (originalQuestions.length === 0) {
+      alert("Hiện tại chưa có đề thi nào. Vui lòng nhờ giáo viên tạo đề mới.");
+      return;
+    }
+    setAppState(AppState.WAITING_FOR_STUDENT);
+  };
+
   const getProgressState = () => {
+     if (appState === AppState.LANDING || appState === AppState.TEACHER_LOGIN) return 0;
      if (appState === AppState.IDLE || appState === AppState.ANALYZING) return 1;
      if (appState === AppState.WAITING_FOR_STUDENT) return 2;
      if (appState === AppState.QUIZ) return 3;
@@ -175,7 +193,7 @@ const App: React.FC = () => {
       <nav className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
-            <div className="flex items-center">
+            <div className="flex items-center cursor-pointer" onClick={() => appState !== AppState.QUIZ && handleExit()}>
               <span className="flex-shrink-0 flex items-center">
                 <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center mr-2">
                    <span className="text-white font-bold text-lg">π</span>
@@ -185,21 +203,44 @@ const App: React.FC = () => {
                 </h1>
               </span>
             </div>
-            <div className="hidden md:flex items-center space-x-2">
-                <span className={`px-3 py-1 rounded-full text-xs font-medium ${currentStep === 1 ? 'bg-blue-100 text-blue-800' : 'text-gray-400'}`}>1. Giáo viên tạo đề</span>
-                <span className="text-gray-300">→</span>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium ${currentStep === 2 ? 'bg-blue-100 text-blue-800' : 'text-gray-400'}`}>2. Nhập thông tin</span>
-                <span className="text-gray-300">→</span>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium ${currentStep === 3 ? 'bg-blue-100 text-blue-800' : 'text-gray-400'}`}>3. Làm bài</span>
-                <span className="text-gray-300">→</span>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium ${currentStep === 4 ? 'bg-blue-100 text-blue-800' : 'text-gray-400'}`}>4. Kết quả</span>
-            </div>
+            
+            {/* Show progress steps only when in active flow */}
+            {currentStep > 0 && (
+              <div className="hidden md:flex items-center space-x-2">
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${currentStep === 1 ? 'bg-blue-100 text-blue-800' : 'text-gray-400'}`}>1. Giáo viên tạo đề</span>
+                  <span className="text-gray-300">→</span>
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${currentStep === 2 ? 'bg-blue-100 text-blue-800' : 'text-gray-400'}`}>2. Nhập thông tin</span>
+                  <span className="text-gray-300">→</span>
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${currentStep === 3 ? 'bg-blue-100 text-blue-800' : 'text-gray-400'}`}>3. Làm bài</span>
+                  <span className="text-gray-300">→</span>
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${currentStep === 4 ? 'bg-blue-100 text-blue-800' : 'text-gray-400'}`}>4. Kết quả</span>
+              </div>
+            )}
+            
+            {/* Show simple Home button if on Landing or Login */}
+            {currentStep === 0 && appState !== AppState.LANDING && (
+                <button onClick={() => setAppState(AppState.LANDING)} className="text-sm text-gray-500 hover:text-blue-600">
+                    ← Quay lại
+                </button>
+            )}
           </div>
         </div>
       </nav>
 
       {/* Main Content Area */}
       <main className="py-10">
+        {appState === AppState.LANDING && (
+          <LandingSection 
+            onTeacherSelect={handleLandingTeacherSelect}
+            onStudentSelect={handleLandingStudentSelect}
+            hasActiveQuiz={originalQuestions.length > 0}
+          />
+        )}
+
+        {appState === AppState.TEACHER_LOGIN && (
+          <TeacherLoginSection onLoginSuccess={handleTeacherLoginSuccess} />
+        )}
+
         {appState === AppState.IDLE && (
           <UploadSection onImageSelected={handleImageSelected} isLoading={false} />
         )}

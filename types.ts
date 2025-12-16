@@ -26,6 +26,8 @@ export interface LeaderboardEntry {
 }
 
 export enum AppState {
+  LANDING = 'LANDING', // Start screen: Choose Teacher or Student
+  TEACHER_LOGIN = 'TEACHER_LOGIN', // Authentication screen
   IDLE = 'IDLE', // Teacher uploading
   ANALYZING = 'ANALYZING', // Processing image
   WAITING_FOR_STUDENT = 'WAITING_FOR_STUDENT', // Student entering info
