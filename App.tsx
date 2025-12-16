@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppState, Question, StudentInfo, LeaderboardEntry } from './types';
 import { generateQuizFromImage } from './services/geminiService';
 import UploadSection from './components/UploadSection';
@@ -7,6 +7,10 @@ import QuizSection from './components/QuizSection';
 import ResultSection from './components/ResultSection';
 import TeacherLoginSection from './components/TeacherLoginSection';
 import LandingSection from './components/LandingSection';
+
+// Keys for localStorage
+const STORAGE_KEY_QUIZ = 'ai_tutor_active_quiz';
+const STORAGE_KEY_LEADERBOARD = 'ai_tutor_leaderboard';
 
 // Helper function to shuffle an array (Fisher-Yates algorithm)
 const shuffleArray = <T,>(array: T[]): T[] => {
@@ -49,15 +53,34 @@ const App: React.FC = () => {
   
   // questions state holds the *current* student's randomized version
   const [questions, setQuestions] = useState<Question[]>([]);
-  // originalQuestions holds the "master" copy from the image analysis
-  const [originalQuestions, setOriginalQuestions] = useState<Question[]>([]);
+  
+  // originalQuestions holds the "master" copy
+  // INITIALIZATION: Try to load from localStorage first
+  const [originalQuestions, setOriginalQuestions] = useState<Question[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_QUIZ);
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error("Failed to load quiz from storage", error);
+      return [];
+    }
+  });
   
   const [userAnswers, setUserAnswers] = useState<Record<number, number>>({});
   const [timeSpent, setTimeSpent] = useState<number>(0);
   const [studentInfo, setStudentInfo] = useState<StudentInfo>({ name: '', className: '', school: '' });
   
-  // State to manage the leaderboard across multiple students for the same quiz
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  // Leaderboard persistence
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_LEADERBOARD);
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error("Failed to load leaderboard from storage", error);
+      return [];
+    }
+  });
+  
   const [currentResultId, setCurrentResultId] = useState<string>("");
 
   // Handler for successful login
@@ -72,8 +95,16 @@ const App: React.FC = () => {
       const generatedQuestions = await generateQuizFromImage(base64, mimeType);
       const questionsWithIds = generatedQuestions.map((q, idx) => ({ ...q, id: idx }));
       
-      setOriginalQuestions(questionsWithIds); // Save the master copy
-      setQuestions(questionsWithIds); // Initialize
+      // Save to State AND LocalStorage
+      setOriginalQuestions(questionsWithIds);
+      localStorage.setItem(STORAGE_KEY_QUIZ, JSON.stringify(questionsWithIds));
+      
+      // Reset leaderboard for new quiz
+      setLeaderboard([]);
+      localStorage.removeItem(STORAGE_KEY_LEADERBOARD);
+
+      // Initialize randomized questions for immediate use (optional, usually handled in start)
+      setQuestions(questionsWithIds); 
       
       // Move to student phase directly after creation
       setAppState(AppState.WAITING_FOR_STUDENT);
@@ -82,6 +113,20 @@ const App: React.FC = () => {
       alert("Có lỗi xảy ra khi tạo đề. Vui lòng thử lại với ảnh rõ nét hơn.");
       setAppState(AppState.IDLE);
     }
+  };
+
+  // Feature: Teacher wants to test the current quiz
+  const handleTeacherTestQuiz = () => {
+    if (originalQuestions.length === 0) return;
+    
+    // Setup dummy info for teacher
+    const teacherInfo = { name: 'Giáo Viên (Test)', className: '', school: '' };
+    setStudentInfo(teacherInfo);
+    
+    // Randomize quiz same as student flow
+    setQuestions(randomizeQuiz(originalQuestions));
+    
+    setAppState(AppState.QUIZ);
   };
 
   // Phase 2: Student enters info -> Start Quiz
@@ -120,14 +165,20 @@ const App: React.FC = () => {
     };
 
     setCurrentResultId(resultId);
-    setLeaderboard(prev => [...prev, newEntry]);
+    
+    // Update State and Storage for Leaderboard
+    setLeaderboard(prev => {
+      const updated = [...prev, newEntry];
+      localStorage.setItem(STORAGE_KEY_LEADERBOARD, JSON.stringify(updated));
+      return updated;
+    });
     
     setAppState(AppState.RESULTS);
   };
 
   // Option A: Next Student (Same Quiz but will be re-shuffled in handleStudentStart)
   const handleNextStudent = () => {
-    // Reset student specific data but KEEP leaderboard
+    // Reset student specific data but KEEP leaderboard and originalQuestions
     setUserAnswers({});
     setTimeSpent(0);
     setStudentInfo({ name: '', className: '', school: '' });
@@ -138,13 +189,19 @@ const App: React.FC = () => {
   // Option B: New Quiz (Teacher Action)
   // This destroys current quiz and goes to login
   const handleNewQuiz = () => {
-    if (confirm("Hành động này sẽ xóa đề thi hiện tại và bảng xếp hạng. Bạn sẽ cần đăng nhập lại để tạo đề mới. Tiếp tục?")) {
+    if (confirm("Hành động này sẽ XÓA VĨNH VIỄN đề thi hiện tại và bảng xếp hạng để tạo đề mới. Bạn có chắc chắn?")) {
+      // Clear Storage
+      localStorage.removeItem(STORAGE_KEY_QUIZ);
+      localStorage.removeItem(STORAGE_KEY_LEADERBOARD);
+
+      // Clear State
       setQuestions([]);
       setOriginalQuestions([]);
       setLeaderboard([]); 
       setUserAnswers({});
       setTimeSpent(0);
       setStudentInfo({ name: '', className: '', school: '' });
+      
       setAppState(AppState.TEACHER_LOGIN);
     }
   };
@@ -153,7 +210,7 @@ const App: React.FC = () => {
   // Returns to Landing Page but PRESERVES the current quiz (if any)
   // So other students can enter without teacher login
   const handleExit = () => {
-    if (confirm("Về màn hình chính? Kết quả làm bài hiện tại sẽ không được lưu (nếu chưa nộp).")) {
+    if (confirm("Về màn hình chính? Kết quả làm bài hiện tại sẽ không được lưu (nếu chưa nộp). Đề thi vẫn sẽ được giữ lại.")) {
       // Clear CURRENT user progress
       setUserAnswers({});
       setTimeSpent(0);
@@ -242,11 +299,19 @@ const App: React.FC = () => {
         )}
 
         {appState === AppState.IDLE && (
-          <UploadSection onImageSelected={handleImageSelected} isLoading={false} />
+          <UploadSection 
+            onImageSelected={handleImageSelected} 
+            isLoading={false} 
+            hasActiveQuiz={originalQuestions.length > 0}
+            onTestQuiz={handleTeacherTestQuiz}
+          />
         )}
         
         {appState === AppState.ANALYZING && (
-           <UploadSection onImageSelected={() => {}} isLoading={true} />
+           <UploadSection 
+             onImageSelected={() => {}} 
+             isLoading={true} 
+           />
         )}
 
         {appState === AppState.WAITING_FOR_STUDENT && (
